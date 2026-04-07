@@ -1,0 +1,154 @@
+# 장단 평가 설정 파일
+# ──────────────────────────────────────────────────────────────
+# 이 파일을 수정하여 평가 내용과 화면 순서를 변경할 수 있습니다.
+# screens 배열에서 항목을 제거하면 해당 화면이 건너뛰어집니다.
+# 항목 순서를 바꾸면 화면 순서도 바뀝니다.
+
+# 주석 입력 키 설정
+annotation_key: "Space"           # 브라우저 KeyboardEvent.code 값
+annotation_key_label: "스페이스바"  # 화면에 표시될 키 이름
+
+# 결과 업로드 설정 (선택사항)
+# Google Apps Script 웹 앱 URL을 붙여넣으면 결과가 자동으로 Google Sheets에 업로드됩니다.
+# 비워두면 로컬 다운로드만 진행됩니다.
+upload_url: "https://script.google.com/macros/s/AKfycbzWiNtxy9OOQCq_Ks9xRr4C0Wuml8eHJxQ5vb-khicnlGMUkhpgGNLj2YUbALxWK70W/exec"
+
+# 시각화 설정
+pixels_per_second: 160            # 초당 픽셀 수 (클수록 확대)
+
+# ──────────────────────────────────────────────────────────────
+# 화면 목록 (위에서 아래 순서로 진행)
+#
+# type: modal          → 안내 화면 (제목, 내용, 버튼)
+# type: annotation_task → 주석 입력 화면 (오디오 재생 + 키 입력)
+# ──────────────────────────────────────────────────────────────
+screens:
+
+  # ── 시작 인사 ────────────────────────────────────────────────
+  - id: greeting
+    type: modal
+    title: "장단 평가에 오신 것을 환영합니다"
+    content: |
+      이 평가는 한국 음악의 장단 개념을
+      실제 음악에 적용할 수 있는지 평가합니다.
+
+      평가는 두 단계로 구성되며, 
+      각 단계마다 짧은 연습 후 본 평가를 진행합니다.
+    button: "시작하기"
+
+  # ── 이름 입력 ────────────────────────────────────────────────
+  - id: name_input
+    type: name_input
+    title: "참가자 이름 입력"
+    content: |
+      결과 파일에 기록될 이름을 입력해 주세요.
+    button: "다음"
+
+  # ── 1단계 안내 ───────────────────────────────────────────────
+  - id: phase1_greeting
+    type: modal
+    title: "1단계: 장단 전환점 표시"
+    content: |
+      음악을 들으면서 장단의 종류가 바뀌는 순간마다
+      {key}를 눌러 표시해 주세요.
+
+      예시: 진양조 → 중모리로 바뀌는 순간,
+            중모리 → 중중모리로 바뀌는 순간 등
+    button: "다음"
+
+  # ── 1단계 연습 안내 ──────────────────────────────────────────
+  - id: phase1_practice_intro
+    type: modal
+    title: "1단계 연습"
+    content: |
+      짧은 연습 음원으로 먼저 연습해 보겠습니다.
+
+      장단이 바뀌는 순간에 {key}를 눌러 주세요.
+      연습이 끝나면 자동으로 다음 단계로 넘어갑니다.
+    button: "연습 시작"
+
+  # ── 1단계 연습 ───────────────────────────────────────────────
+  - id: phase1_practice
+    type: annotation_task
+    phase: 1
+    mode: practice
+    audio: "practice.wav"
+    instruction: "장단이 바뀌는 순간에 {key}를 누르세요"
+
+  # ── 1단계 평가 시작 안내 ─────────────────────────────────────
+  - id: phase1_test_intro
+    type: modal
+    title: "1단계 평가 시작"
+    content: |
+      이제 실제 평가를 시작합니다.
+
+      준비가 되면 버튼을 클릭하세요.
+      평가 중에는 음악을 멈추거나 되감을 수 없습니다.
+    button: "평가 시작"
+
+  # ── 1단계 평가 ───────────────────────────────────────────────
+  - id: phase1_test
+    type: annotation_task
+    phase: 1
+    mode: test
+    audio: "audio.wav"
+    instruction: "장단이 바뀌는 순간에 {key}를 누르세요"
+
+  # ── 2단계 안내 ───────────────────────────────────────────────
+  - id: phase2_greeting
+    type: modal
+    title: "2단계: 장단 시작점 표시"
+    content: |
+      이번에는 같은 음악을 다시 들으면서
+      각 장단 주기가 시작되는 순간마다
+      {key}를 눌러 표시해 주세요.
+
+      장단의 첫 번째 박이 시작되는 순간을 표시합니다.
+    button: "다음"
+
+  # ── 2단계 연습 안내 ──────────────────────────────────────────
+  - id: phase2_practice_intro
+    type: modal
+    title: "2단계 연습"
+    content: |
+      짧은 연습 음원으로 먼저 연습해 보겠습니다.
+
+      장단 주기가 시작되는 순간에 {key}를 눌러 주세요.
+    button: "연습 시작"
+
+  # ── 2단계 연습 ───────────────────────────────────────────────
+  - id: phase2_practice
+    type: annotation_task
+    phase: 2
+    mode: practice
+    audio: "practice.wav"
+    instruction: "장단 주기가 시작되는 순간에 {key}를 누르세요"
+
+  # ── 2단계 평가 시작 안내 ─────────────────────────────────────
+  - id: phase2_test_intro
+    type: modal
+    title: "2단계 평가 시작"
+    content: |
+      이제 2단계 평가를 시작합니다.
+
+      준비가 되면 버튼을 클릭하세요.
+    button: "평가 시작"
+
+  # ── 2단계 평가 ───────────────────────────────────────────────
+  - id: phase2_test
+    type: annotation_task
+    phase: 2
+    mode: test
+    audio: "audio.wav"
+    instruction: "장단 주기가 시작되는 순간에 {key}를 누르세요"
+
+  # ── 마무리 ───────────────────────────────────────────────────
+  - id: thankyou
+    type: modal
+    title: "평가가 완료되었습니다"
+    content: |
+      참여해 주셔서 감사합니다.
+
+      아래 버튼을 클릭하여 결과 파일을 저장하세요.
+    button: "결과 저장"
+    action: "download_results"

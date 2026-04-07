@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>장단 평가</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4/dist/js-yaml.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            width: 100%; height: 100%; overflow: hidden;
+            background: #000;
+            color: #E0E0E0;
+            font-family: 'Noto Sans KR', -apple-system, sans-serif;
+            user-select: none;
+        }
+
+        /* ── Loading ── */
+        #loading {
+            position: fixed; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: #000;
+            z-index: 900;
+            gap: 18px;
+        }
+        #loading.hidden { display: none; }
+        #loading-text {
+            font-size: 1rem; opacity: 0.5;
+            letter-spacing: 0.06em;
+        }
+        #loading-bar-wrap {
+            width: 220px; height: 2px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        #loading-bar {
+            height: 100%; width: 0%;
+            background: rgba(255, 215, 0, 0.5);
+            border-radius: 2px;
+            transition: width 0.4s ease;
+        }
+
+        /* ── Modal ── */
+        #modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 500;
+        }
+        #modal-overlay.hidden { display: none; }
+
+        #modal-card {
+            background: #0d1017;
+            border: 1px solid rgba(255, 215, 0, 0.18);
+            border-radius: 14px;
+            padding: 65px 75px 60px;
+            max-width: 660px;
+            width: 90%;
+            text-align: center;
+        }
+
+        #modal-title {
+            font-size: 2.06rem;
+            font-weight: 400;
+            color: #FFD700;
+            margin-bottom: 28px;
+            line-height: 1.4;
+            letter-spacing: 0.02em;
+        }
+
+        #modal-content {
+            font-size: 1.21rem;
+            line-height: 2;
+            opacity: 0.72;
+            margin-bottom: 40px;
+            white-space: pre-wrap;
+            text-align: center;
+        }
+
+        #modal-name-input {
+            display: block;
+            width: 100%;
+            padding: 13px 18px;
+            margin-bottom: 28px;
+            background: rgba(255,255,255,0.05);
+            border: 1.5px solid rgba(255, 215, 0, 0.35);
+            border-radius: 7px;
+            color: #E0E0E0;
+            font-family: inherit;
+            font-size: 1.21rem;
+            text-align: center;
+            outline: none;
+            letter-spacing: 0.04em;
+        }
+        #modal-name-input:focus {
+            border-color: rgba(255, 215, 0, 0.7);
+            background: rgba(255,255,255,0.08);
+        }
+        #modal-name-input.hidden { display: none; }
+
+        #modal-btn {
+            background: transparent;
+            border: 1.5px solid rgba(255, 215, 0, 0.45);
+            color: #FFD700;
+            font-family: inherit;
+            font-size: 1.21rem;
+            padding: 16px 55px;
+            border-radius: 7px;
+            cursor: pointer;
+            transition: all 0.18s;
+            letter-spacing: 0.06em;
+        }
+        #modal-btn:hover {
+            background: rgba(255, 215, 0, 0.07);
+            border-color: rgba(255, 215, 0, 0.75);
+        }
+
+        #modal-upload-status {
+            margin-top: 16px;
+            font-size: 0.95rem;
+            letter-spacing: 0.03em;
+            min-height: 1.4em;
+        }
+        #modal-upload-status.hidden { display: none; }
+        #modal-upload-status.uploading { color: rgba(255,255,255,0.45); }
+        #modal-upload-status.success   { color: rgba(100, 220, 120, 0.85); }
+        #modal-upload-status.error     { color: rgba(239, 83, 80, 0.85); }
+
+        #modal-enter-hint {
+            margin-top: 14px;
+            font-size: 0.98rem;
+            opacity: 0.32;
+            letter-spacing: 0.04em;
+        }
+        #modal-enter-hint kbd {
+            display: inline-block;
+            padding: 1px 7px;
+            border: 1px solid rgba(255,255,255,0.25);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 0.98rem;
+            background: rgba(255,255,255,0.06);
+        }
+
+        /* ── Visualization Canvas ── */
+        #canvas {
+            position: fixed; inset: 0;
+            width: 100%; height: 100%;
+        }
+        #canvas.hidden { display: none; }
+
+        /* ── Assessment HUD (overlaid on canvas) ── */
+        #hud {
+            position: fixed; inset: 0;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #hud.hidden { display: none; }
+
+        #hud-phase {
+            position: absolute;
+            top: 22px; left: 28px;
+            font-size: 1.375rem;
+            font-weight: 500;
+            opacity: 0.75;
+            letter-spacing: 0.06em;
+        }
+
+        #hud-count {
+            position: absolute;
+            top: 22px; right: 28px;
+            font-size: 1.375rem;
+            font-weight: 500;
+            opacity: 0.75;
+            letter-spacing: 0.04em;
+        }
+
+        #hud-instruction {
+            position: absolute;
+            bottom: 52px;
+            left: 50%; transform: translateX(-50%);
+            font-size: 1.375rem;
+            opacity: 0.6;
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+        }
+        .key-label {
+            display: inline-block;
+            padding: 0.05em 0.45em 0.1em;
+            border: 1px solid rgba(255, 215, 0, 0.35);
+            border-radius: 4px;
+            background: rgba(255, 215, 0, 0.06);
+            color: #FFD700;
+            font-size: 0.88em;
+            margin: 0 0.25em;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            vertical-align: baseline;
+        }
+
+        #hud-progress-wrap {
+            position: absolute;
+            bottom: 18px;
+            left: 22%; right: 22%;
+            height: 13px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 7px;
+            border: 1.5px solid rgba(255, 255, 255, 0.22);
+            box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 1px 3px rgba(0,0,0,0.4);
+        }
+        #hud-progress-fill {
+            height: 100%; width: 0%;
+            background: rgba(255, 215, 0, 0.65);
+            border-radius: 6px;
+        }
+
+        /* ── Countdown overlay ── */
+        #countdown-overlay {
+            position: fixed; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 50;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.5);
+        }
+        #countdown-overlay.hidden { display: none; }
+
+        #countdown-number {
+            font-size: 5.5rem;
+            font-weight: 300;
+            color: #FFD700;
+            opacity: 0;
+            letter-spacing: 0.08em;
+            line-height: 1;
+        }
+        @keyframes countdown-fade {
+            0%   { opacity: 0;    transform: translateY(6px); }
+            18%  { opacity: 0.72; transform: translateY(0); }
+            72%  { opacity: 0.55; transform: translateY(0); }
+            100% { opacity: 0;    transform: translateY(-4px); }
+        }
+        #countdown-number.pop {
+            animation: countdown-fade 0.88s ease-in-out forwards;
+        }
+
+        /* Keypress flash */
+        #key-flash {
+            position: absolute; inset: 0;
+            background: rgba(255, 255, 255, 0.04);
+            opacity: 0;
+            pointer-events: none;
+        }
+        @keyframes flash-out {
+            0%   { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        #key-flash.active {
+            animation: flash-out 0.25s ease-out forwards;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Loading screen -->
+    <div id="loading">
+        <div id="loading-text">로딩 중...</div>
+        <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+    </div>
+
+    <!-- Modal overlay -->
+    <div id="modal-overlay" class="hidden">
+        <div id="modal-card">
+            <h2 id="modal-title"></h2>
+            <div id="modal-content"></div>
+            <input type="text" id="modal-name-input" class="hidden" placeholder="이름을 입력하세요" maxlength="50" autocomplete="off">
+            <button id="modal-btn">다음</button>
+            <div id="modal-upload-status" class="hidden"></div>
+            <div id="modal-enter-hint">또는 <kbd>Enter</kbd> 키를 누르세요</div>
+        </div>
+    </div>
+
+    <!-- Countdown overlay -->
+    <div id="countdown-overlay" class="hidden">
+        <div id="countdown-number"></div>
+    </div>
+
+    <!-- Visualization canvas -->
+    <canvas id="canvas" class="hidden"></canvas>
+
+    <!-- Assessment HUD -->
+    <div id="hud" class="hidden">
+        <div id="hud-phase"></div>
+        <div id="hud-count"></div>
+        <div id="hud-instruction"></div>
+        <div id="hud-progress-wrap">
+            <div id="hud-progress-fill"></div>
+        </div>
+        <div id="key-flash"></div>
+    </div>
+
+    <audio id="audio" preload="none"></audio>
+
+    <script>
+    (function () {
+        'use strict';
+
+        // ── Phase annotation marker colors ─────────────────────────────
+        const PHASE_COLORS = {
+            1: { line: 'rgba(255, 107, 53, 0.65)',  triangle: 'rgba(255, 107, 53, 0.9)' },
+            2: { line: 'rgba(178, 102, 255, 0.65)', triangle: 'rgba(178, 102, 255, 0.9)' }
+        };
+
+        // ── State ──────────────────────────────────────────────────────
+        let config        = null;
+        let screenIndex   = -1;
+        let results       = [];          // {screenId, phase, mode, annotations:[{time}]}
+        let sessionAnnotations = [];     // current task annotations
+        let annotationMarkers  = [];     // same data, used for rendering
+        let currentPhase  = 1;
+        let studentName   = '';
+
+        let pitchContour  = [];          // [{t, f, valid}]
+        let pitchLogMin   = 0;
+        let pitchLogMax   = 1;
+
+        let pps           = 160;         // pixels per second (from config)
+        let dpr           = 1;
+
+        let isAnimating     = false;
+        let isCountingDown  = false;
+        let rafId           = null;
+        let currentScreen = null;        // screen object while in annotation_task
+
+        // Audio + waveform cache keyed by filename
+        // { [filename]: { blobUrl: string|null, waveform: {mins,maxs,sr,duration}|null } }
+        const audioCache = {};
+
+        // ── DOM refs ───────────────────────────────────────────────────
+        const loadingEl      = document.getElementById('loading');
+        const loadingText    = document.getElementById('loading-text');
+        const loadingBar     = document.getElementById('loading-bar');
+        const modalOverlay   = document.getElementById('modal-overlay');
+        const modalTitle     = document.getElementById('modal-title');
+        const modalContent   = document.getElementById('modal-content');
+        const modalNameInput    = document.getElementById('modal-name-input');
+        const modalUploadStatus = document.getElementById('modal-upload-status');
+        const modalBtn          = document.getElementById('modal-btn');
+        const canvasEl       = document.getElementById('canvas');
+        const ctx            = canvasEl.getContext('2d');
+        const hudEl          = document.getElementById('hud');
+        const hudPhase       = document.getElementById('hud-phase');
+        const hudCount       = document.getElementById('hud-count');
+        const hudInstruction = document.getElementById('hud-instruction');
+        const hudProgressFill = document.getElementById('hud-progress-fill');
+        const keyFlash          = document.getElementById('key-flash');
+        const countdownOverlay  = document.getElementById('countdown-overlay');
+        const countdownNumber   = document.getElementById('countdown-number');
+        const audioEl           = document.getElementById('audio');
+
+        // ── Initialization ─────────────────────────────────────────────
+        async function init() {
+            try {
+                // 1. Load config.yaml
+                setLoadingText('설정 파일 로딩 중...');
+                const cfgResp = await fetch('config.yaml');
+                if (!cfgResp.ok) throw new Error(`config.yaml 로딩 실패 (HTTP ${cfgResp.status})`);
+                config = jsyaml.load(await cfgResp.text());
+                pps = config.pixels_per_second || 160;
+
+                // 2. Load pitch contour (optional, small file — fine to load upfront)
+                setLoadingText('음고 데이터 로딩 중...');
+                setLoadingProgress(50);
+                try {
+                    const pr = await fetch('pitch_contour.csv');
+                    if (pr.ok) parsePitchContour(await pr.text());
+                } catch (_) { /* optional */ }
+
+                setLoadingProgress(100);
+
+                // 3. Setup
+                resizeCanvas();
+                window.addEventListener('resize', resizeCanvas);
+                document.addEventListener('keydown', handleKeyDown);
+
+                // 4. Start (audio waveforms are decoded lazily, after user gesture)
+                loadingEl.classList.add('hidden');
+                showScreen(0);
+
+            } catch (e) {
+                loadingText.textContent = '오류: ' + e.message;
+                loadingText.style.color = '#EF5350';
+                console.error(e);
+            }
+        }
+
+        function setLoadingText(msg) { loadingText.textContent = msg; }
+        function setLoadingProgress(pct) { loadingBar.style.width = Math.min(100, pct) + '%'; }
+
+        // ── Template interpolation ─────────────────────────────────────
+        // Returns HTML: escapes the text, then replaces {key} with a styled span
+        function escapeHTML(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+        function interpolate(text) {
+            const keyLabel = config?.annotation_key_label || '스페이스바';
+            const keySpan  = `<span class="key-label">${escapeHTML(keyLabel)}</span>`;
+            return escapeHTML(text || '').replace(/\{key\}/g, keySpan);
+        }
+
+        // ── Pitch Contour Parsing ──────────────────────────────────────
+        function parsePitchContour(text) {
+            const rows = text.split(/\r?\n/);
+            const pts = [];
+            for (const row of rows) {
+                const line = row.trim();
+                if (!line) continue;
+                const parts = line.split(',');
+                if (parts.length < 2) continue;
+                const t = +parts[0];
+                const f = +parts[1];
+                const c = parts.length >= 3 ? +parts[2] : 1;
+                if (!isFinite(t)) continue;
+                const valid = isFinite(f) && f >= 40 && f <= 2200 && isFinite(c) && c >= 0.08;
+                pts.push({ t, f, c, valid });
+            }
+            if (!pts.length) return;
+
+            pitchContour = pts.sort((a, b) => a.t - b.t);
+
+            const validFreqs = pitchContour.filter(p => p.valid).map(p => p.f).sort((a, b) => a - b);
+            if (!validFreqs.length) return;
+
+            const lo = validFreqs[Math.floor(validFreqs.length * 0.02)];
+            const hi = validFreqs[Math.floor(validFreqs.length * 0.98)];
+            pitchLogMin = Math.log10(Math.max(1, lo));
+            pitchLogMax = Math.log10(Math.max(1, hi > lo ? hi : lo + 1));
+            if (!(pitchLogMax > pitchLogMin)) pitchLogMax = pitchLogMin + 0.5;
+            // Add a little vertical padding
+            const range = pitchLogMax - pitchLogMin;
+            pitchLogMin -= range * 0.08;
+            pitchLogMax += range * 0.08;
+        }
+
+        // ── Waveform Decoding (lazy, called after user gesture) ───────
+        // audioCache[filename] = { waveform: {...} | null }
+        async function ensureWaveform(filename) {
+            if (audioCache[filename] !== undefined) return; // already tried
+            audioCache[filename] = { waveform: null };      // mark as attempted
+
+            try {
+                const resp = await fetch(filename);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const arrayBuffer = await resp.arrayBuffer();
+
+                // AudioContext creation is safe here: user has already clicked a button
+                const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+                let audioBuffer;
+                try {
+                    audioBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+                } finally {
+                    tempCtx.close();
+                }
+
+                audioCache[filename] = { waveform: buildWaveformThumbnail(audioBuffer) };
+            } catch (e) {
+                console.warn(`Waveform decode failed for "${filename}":`, e.message);
+                // waveform stays null — visualization shows empty band, audio still plays
+            }
+        }
+
+        function buildWaveformThumbnail(audioBuffer) {
+            const SR = 500; // samples per second for the thumbnail
+            const data = audioBuffer.getChannelData(0);
+            const nativeSR = audioBuffer.sampleRate;
+            const chunkSize = Math.max(1, Math.floor(nativeSR / SR));
+            const numChunks = Math.ceil(data.length / chunkSize);
+            const mins = new Float32Array(numChunks);
+            const maxs = new Float32Array(numChunks);
+
+            for (let i = 0; i < numChunks; i++) {
+                let mn = 1, mx = -1;
+                const start = i * chunkSize;
+                const end = Math.min(start + chunkSize, data.length);
+                for (let j = start; j < end; j++) {
+                    if (data[j] < mn) mn = data[j];
+                    if (data[j] > mx) mx = data[j];
+                }
+                mins[i] = mn;
+                maxs[i] = mx;
+            }
+            return { mins, maxs, sr: SR, duration: audioBuffer.duration };
+        }
+
+        // ── Canvas Resize ──────────────────────────────────────────────
+        function resizeCanvas() {
+            dpr = window.devicePixelRatio || 1;
+            canvasEl.width  = Math.floor(window.innerWidth  * dpr);
+            canvasEl.height = Math.floor(window.innerHeight * dpr);
+            canvasEl.style.width  = window.innerWidth  + 'px';
+            canvasEl.style.height = window.innerHeight + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
+        // ── Screen Flow ────────────────────────────────────────────────
+        function showScreen(index) {
+            if (!config || index >= (config.screens || []).length) return;
+            screenIndex = index;
+            const screen = config.screens[index];
+
+            if (screen.type === 'modal') {
+                showModal(screen);
+            } else if (screen.type === 'name_input') {
+                showNameInputModal(screen);
+            } else if (screen.type === 'annotation_task') {
+                showAnnotationTask(screen);
+            } else {
+                // Unknown type — skip
+                showScreen(index + 1);
+            }
+        }
+
+        function nextScreen() {
+            stopTask();
+            showScreen(screenIndex + 1);
+        }
+
+        // ── Modal ──────────────────────────────────────────────────────
+        function showModal(screen) {
+            stopTask();
+            canvasEl.classList.add('hidden');
+            hudEl.classList.add('hidden');
+
+            modalTitle.innerHTML   = interpolate(screen.title   || '');
+            modalContent.innerHTML = interpolate(screen.content || '');
+            modalBtn.innerHTML     = interpolate(screen.button  || '다음');
+            modalNameInput.classList.add('hidden');
+
+            if (screen.action === 'download_results') {
+                modalUploadStatus.className = 'hidden';
+                modalUploadStatus.textContent = '';
+                modalBtn.onclick = async () => {
+                    modalBtn.disabled = true;
+                    await downloadResults();
+                    modalBtn.disabled = false;
+                    nextScreen();
+                };
+            } else {
+                modalUploadStatus.className = 'hidden';
+                modalUploadStatus.textContent = '';
+                modalBtn.onclick = nextScreen;
+            }
+
+            modalOverlay.classList.remove('hidden');
+        }
+
+        // ── Name Input Modal ───────────────────────────────────────────
+        function showNameInputModal(screen) {
+            stopTask();
+            canvasEl.classList.add('hidden');
+            hudEl.classList.add('hidden');
+
+            modalTitle.innerHTML   = interpolate(screen.title   || '이름을 입력해 주세요');
+            modalContent.innerHTML = interpolate(screen.content || '');
+            modalBtn.innerHTML     = interpolate(screen.button  || '다음');
+            modalNameInput.classList.remove('hidden');
+            modalNameInput.value = studentName;
+            // Focus after the overlay is visible
+            requestAnimationFrame(() => modalNameInput.focus());
+
+            modalBtn.onclick = () => {
+                const name = modalNameInput.value.trim();
+                if (!name) {
+                    modalNameInput.style.borderColor = 'rgba(239, 83, 80, 0.75)';
+                    modalNameInput.focus();
+                    return;
+                }
+                studentName = name;
+                modalNameInput.style.borderColor = '';
+                modalNameInput.classList.add('hidden');
+                nextScreen();
+            };
+
+            modalNameInput.oninput = () => {
+                if (modalNameInput.value.trim()) modalNameInput.style.borderColor = '';
+            };
+
+            modalOverlay.classList.remove('hidden');
+        }
+
+        // ── Annotation Task ────────────────────────────────────────────
+        async function showAnnotationTask(screen) {
+            currentScreen = screen;
+            modalOverlay.classList.add('hidden');
+
+            // Reset session state
+            sessionAnnotations = [];
+            annotationMarkers  = [];
+            currentPhase = screen.phase || 1;
+
+            // Show canvas immediately with a loading message
+            const modeLabel = screen.mode === 'practice' ? '연습' : '평가';
+            hudPhase.textContent = `${currentPhase}단계 ${modeLabel}`;
+            hudInstruction.textContent = '음악 준비 중...';
+            hudCount.textContent = '';
+            hudProgressFill.style.transition = 'none';
+            hudProgressFill.style.width = '0%';
+
+            canvasEl.classList.remove('hidden');
+            hudEl.classList.remove('hidden');
+            startAnimation(); // show visualization immediately (pitch scrolls when audio starts)
+
+            // Decode waveform lazily (AudioContext safe: user just clicked a button)
+            if (screen.audio) await ensureWaveform(screen.audio);
+
+            // Update instruction once ready
+            hudInstruction.innerHTML = screen.instruction
+                ? interpolate(screen.instruction)
+                : interpolate('{key} 를 눌러 표시하세요');
+            hudCount.textContent = '표시: 0회';
+
+            // Start audio (use filename directly — server.py handles Range requests)
+            if (screen.audio) {
+                audioEl.src = screen.audio;
+                audioEl.currentTime = 0;
+                audioEl.onended = onTaskEnded;
+                audioEl.onerror = () => {
+                    hudInstruction.textContent = `오디오 파일을 찾을 수 없습니다: ${screen.audio}`;
+                    setTimeout(nextScreen, 2500);
+                };
+                audioEl.load();
+                await runCountdown();
+                audioEl.play().catch(e => {
+                    console.warn('Audio play blocked:', e);
+                    hudInstruction.textContent = '아무 키나 눌러 시작하세요';
+                    function resumeOnKey() {
+                        document.removeEventListener('keydown', resumeOnKey, true);
+                        audioEl.play().catch(console.warn);
+                    }
+                    document.addEventListener('keydown', resumeOnKey, true);
+                });
+            } else {
+                hudInstruction.textContent = `오디오 파일이 설정되지 않았습니다`;
+                setTimeout(nextScreen, 2500);
+            }
+        }
+
+        function onTaskEnded() {
+            if (!currentScreen) return;
+            results.push({
+                screenId:    currentScreen.id,
+                phase:       currentScreen.phase,
+                mode:        currentScreen.mode,
+                annotations: sessionAnnotations.map(a => ({ time: a.time }))
+            });
+            nextScreen();
+        }
+
+        function stopTask() {
+            isAnimating = false;
+            if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+            audioEl.pause();
+            audioEl.onended = null;
+            currentScreen = null;
+        }
+
+        // ── Animation Loop ─────────────────────────────────────────────
+        function startAnimation() {
+            isAnimating = true;
+            function frame() {
+                if (!isAnimating) return;
+                render();
+                rafId = requestAnimationFrame(frame);
+            }
+            rafId = requestAnimationFrame(frame);
+        }
+
+        function render() {
+            const W = window.innerWidth;
+            const H = window.innerHeight;
+            const t = audioEl.currentTime;
+            const duration = audioEl.duration || 1;
+
+            // Update progress
+            const pct = (t / duration * 100).toFixed(2);
+            hudProgressFill.style.transition = 'width 0.3s linear';
+            hudProgressFill.style.width = pct + '%';
+
+            // Clear
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, W, H);
+
+            const centerX = W / 2;
+            const vizH    = Math.floor(H * 0.6);   // total visualization height (60% of screen)
+            const vizY    = Math.floor((H - vizH) / 2); // vertically centered
+            const pitchH  = Math.floor(vizH * 0.55);
+            const waveH   = vizH - pitchH;
+
+            // Pitch band
+            drawPitchBand(ctx, t, centerX, vizY, W, pitchH);
+
+            // Divider
+            ctx.fillStyle = 'rgba(255,255,255,0.06)';
+            ctx.fillRect(0, vizY + pitchH, W, 1);
+
+            // Waveform band
+            const waveform = audioCache[currentScreen?.audio]?.waveform || null;
+            drawWaveformBand(ctx, t, centerX, waveform, 0, vizY + pitchH, W, waveH);
+
+            // Annotation markers (slightly taller than the viz area)
+            const annPad = 14; // px overhang above and below viz bands
+            drawAnnotations(ctx, t, centerX, W, vizY - annPad, vizH + annPad * 2);
+
+            // Center playhead (spans full viz area)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.80)';
+            ctx.fillRect(centerX - 1, vizY, 2, vizH);
+        }
+
+        // ── Draw: Pitch Contour ────────────────────────────────────────
+        // y0: top of band, H: height of band (both in CSS px)
+        function drawPitchBand(ctx, t, centerX, y0, W, H) {
+            if (!pitchContour.length) return;
+
+            const halfW   = centerX;
+            const tStart  = t - halfW / pps;
+            const tEnd    = t + halfW / pps;
+            const MAX_GAP = 0.15;
+
+            let si = pitchLowerBound(tStart);
+            if (si > 0) si--;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, y0, W, H);
+            ctx.clip();
+
+            ctx.beginPath();
+            let prevT  = -999;
+            let inPath = false;
+
+            for (let i = si; i < pitchContour.length; i++) {
+                const p = pitchContour[i];
+                if (p.t > tEnd) break;
+                if (!p.valid) { inPath = false; continue; }
+
+                const px = centerX + (p.t - t) * pps;
+                const lf = Math.log10(Math.max(1, p.f));
+                // map frequency to y within [y0, y0+H]
+                const py  = y0 + H - ((lf - pitchLogMin) / (pitchLogMax - pitchLogMin)) * H;
+                const cpy = Math.max(y0 + 2, Math.min(y0 + H - 2, py));
+
+                if (!inPath || (p.t - prevT) > MAX_GAP) {
+                    ctx.moveTo(px, cpy);
+                    inPath = true;
+                } else {
+                    ctx.lineTo(px, cpy);
+                }
+                prevT = p.t;
+            }
+
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth   = 1.5;
+            ctx.lineJoin    = 'round';
+            ctx.lineCap     = 'round';
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function pitchLowerBound(targetT) {
+            let lo = 0, hi = pitchContour.length;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (pitchContour[mid].t < targetT) lo = mid + 1;
+                else hi = mid;
+            }
+            return lo;
+        }
+
+        // ── Draw: Waveform ─────────────────────────────────────────────
+        function drawWaveformBand(ctx, t, centerX, waveform, x0, y0, W, H) {
+            if (!waveform) return;
+
+            const yMid      = y0 + H / 2;
+            const ampScale  = H * 0.44;
+            const halfPixel = 0.5 / pps; // half a pixel's worth of time
+            const lastIdx   = waveform.mins.length - 1;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(x0, y0, W, H);
+            ctx.clip();
+
+            ctx.fillStyle = 'rgba(77, 208, 225, 0.65)';
+
+            for (let px = 0; px < W; px++) {
+                const sT = t + (px - centerX) / pps;
+                if (sT < 0 || sT >= waveform.duration) continue;
+
+                // Cover the full time range this pixel represents to avoid aliasing
+                const i0 = Math.max(0,       Math.floor((sT - halfPixel) * waveform.sr));
+                const i1 = Math.min(lastIdx, Math.floor((sT + halfPixel) * waveform.sr));
+
+                let mn = waveform.mins[i0], mx = waveform.maxs[i0];
+                for (let i = i0 + 1; i <= i1; i++) {
+                    if (waveform.mins[i] < mn) mn = waveform.mins[i];
+                    if (waveform.maxs[i] > mx) mx = waveform.maxs[i];
+                }
+
+                const y1   = Math.round(yMid - mx * ampScale);
+                const y2   = Math.round(yMid - mn * ampScale);
+                const barH = Math.max(1, y2 - y1);
+
+                ctx.fillRect(px, y1, 1, barH);
+            }
+
+            ctx.restore();
+        }
+
+        // ── Draw: Annotation Markers ───────────────────────────────────
+        function drawAnnotations(ctx, t, centerX, W, y0, H) {
+            const colors = PHASE_COLORS[currentPhase] || PHASE_COLORS[1];
+
+            for (const ann of annotationMarkers) {
+                const px = centerX + (ann.time - t) * pps;
+                if (px < 0 || px > W) continue;
+
+                // Vertical line
+                ctx.fillStyle = colors.line;
+                ctx.fillRect(Math.round(px - 0.5), y0, 2, H);
+
+                // Triangle marker at top of viz area
+                ctx.fillStyle = colors.triangle;
+                ctx.beginPath();
+                ctx.moveTo(px - 5, y0);
+                ctx.lineTo(px + 5, y0);
+                ctx.lineTo(px, y0 + 10);
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+
+        // ── Keyboard Handler ───────────────────────────────────────────
+        function handleKeyDown(e) {
+            // Enter triggers the modal button when a modal is visible
+            if (e.code === 'Enter' && !modalOverlay.classList.contains('hidden')) {
+                e.preventDefault();
+                modalBtn.click();
+                return;
+            }
+
+            if (!currentScreen || !isAnimating || isCountingDown) return;
+
+            const annotCode = config?.annotation_key || 'Space';
+            // Match by KeyboardEvent.code or .key
+            const isAnnotKey = (e.code === annotCode) || (e.key === annotCode);
+            if (!isAnnotKey) return;
+
+            e.preventDefault();
+
+            const time = audioEl.currentTime;
+            const ann  = { time };
+            sessionAnnotations.push(ann);
+            annotationMarkers.push(ann);
+            hudCount.textContent = `표시: ${sessionAnnotations.length}회`;
+            triggerFlash();
+        }
+
+        // ── Countdown ──────────────────────────────────────────────────
+        function runCountdown(steps = ['3', '2', '1', '시작']) {
+            return new Promise(resolve => {
+                isCountingDown = true;
+                countdownOverlay.classList.remove('hidden');
+                let i = 0;
+                function showStep() {
+                    if (i >= steps.length) {
+                        countdownOverlay.classList.add('hidden');
+                        isCountingDown = false;
+                        resolve();
+                        return;
+                    }
+                    countdownNumber.textContent = steps[i++];
+                    countdownNumber.classList.remove('pop');
+                    void countdownNumber.offsetWidth;
+                    countdownNumber.classList.add('pop');
+                    setTimeout(showStep, 900);
+                }
+                showStep();
+            });
+        }
+
+        function triggerFlash() {
+            keyFlash.classList.remove('active');
+            void keyFlash.offsetWidth; // force reflow to restart animation
+            keyFlash.classList.add('active');
+        }
+
+        // ── Results Download + Upload ──────────────────────────────────
+        async function downloadResults() {
+            const output = {
+                exported_at:  new Date().toISOString(),
+                student_name: studentName || '익명',
+                results: results.filter(r => r.mode !== 'practice').map(r => ({
+                    screen_id:   r.screenId,
+                    phase:       r.phase,
+                    mode:        r.mode,
+                    count:       r.annotations.length,
+                    annotations: r.annotations.map(a => ({
+                        time_sec: parseFloat(a.time.toFixed(3))
+                    }))
+                }))
+            };
+
+            // Local download
+            const json     = JSON.stringify(output, null, 2);
+            const blob     = new Blob([json], { type: 'application/json' });
+            const safeName = (studentName || '익명').replace(/[^\w가-힣ㄱ-ㅎㅏ-ㅣ]/g, '_');
+            const timestamp = new Date().toISOString().slice(0,19).replace(/[T:]/g,'-');
+            const url = URL.createObjectURL(blob);
+            const a   = document.createElement('a');
+            a.href     = url;
+            a.download = `${safeName}_${timestamp}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            // Upload to Google Sheets (if upload_url is set in config)
+            const uploadUrl = config?.upload_url;
+            if (!uploadUrl) return;
+
+            setUploadStatus('uploading', '업로드 중...');
+            try {
+                // No Content-Type header — avoids CORS preflight which Apps Script can't handle
+                const resp = await fetch(uploadUrl, {
+                    method:   'POST',
+                    redirect: 'follow',
+                    body:     json,
+                });
+                const result = await resp.json();
+                if (result.status === 'ok') {
+                    setUploadStatus('success', `✓ 업로드 완료 (${result.rows_added})`);
+                } else {
+                    throw new Error(result.message || '알 수 없는 오류');
+                }
+            } catch (err) {
+                console.error('Upload failed:', err);
+                setUploadStatus('error', `✗ 업로드 실패 — 로컬 파일을 제출해 주세요 (${err.message})`);
+                // Wait a moment so the user can read the error before the screen advances
+                await new Promise(r => setTimeout(r, 3000));
+            }
+        }
+
+        function setUploadStatus(type, message) {
+            modalUploadStatus.className = type;
+            modalUploadStatus.textContent = message;
+        }
+
+        // ── Start ──────────────────────────────────────────────────────
+        init();
+
+    }());
+    </script>
+</body>
+</html>
