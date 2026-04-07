@@ -61,6 +61,9 @@
             max-width: 660px;
             width: 90%;
             text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
         #modal-title {
@@ -118,6 +121,25 @@
             background: rgba(255, 215, 0, 0.07);
             border-color: rgba(255, 215, 0, 0.75);
         }
+
+        #modal-restart-btn {
+            margin-top: 32px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.45);
+            font-family: inherit;
+            font-size: 0.95rem;
+            padding: 10px 32px;
+            border-radius: 7px;
+            cursor: pointer;
+            transition: all 0.18s;
+            letter-spacing: 0.04em;
+        }
+        #modal-restart-btn:hover {
+            border-color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.8);
+        }
+        #modal-restart-btn.hidden { display: none; }
 
         #modal-upload-status {
             margin-top: 16px;
@@ -279,6 +301,7 @@
             <button id="modal-btn">다음</button>
             <div id="modal-upload-status" class="hidden"></div>
             <div id="modal-enter-hint">또는 <kbd>Enter</kbd> 키를 누르세요</div>
+            <button id="modal-restart-btn" class="hidden">처음으로 돌아가기</button>
         </div>
     </div>
 
@@ -348,6 +371,7 @@
         const modalNameInput    = document.getElementById('modal-name-input');
         const modalUploadStatus = document.getElementById('modal-upload-status');
         const modalBtn          = document.getElementById('modal-btn');
+        const modalRestartBtn   = document.getElementById('modal-restart-btn');
         const canvasEl       = document.getElementById('canvas');
         const ctx            = canvasEl.getContext('2d');
         const hudEl          = document.getElementById('hud');
@@ -589,15 +613,23 @@
             modalContent.innerHTML = interpolate(screen.content || '');
             modalBtn.innerHTML     = interpolate(screen.button  || '다음');
             modalNameInput.classList.add('hidden');
+            modalRestartBtn.classList.add('hidden');
 
             if (screen.action === 'download_results') {
                 modalUploadStatus.className = 'hidden';
                 modalUploadStatus.textContent = '';
+                modalRestartBtn.classList.remove('hidden');
+                modalRestartBtn.onclick = () => {
+                    modalRestartBtn.classList.add('hidden');
+                    results = [];
+                    sessionAnnotations = [];
+                    studentName = '';
+                    showScreen(0);
+                };
                 modalBtn.onclick = async () => {
                     modalBtn.disabled = true;
-                    await downloadResults();
-                    modalBtn.disabled = false;
-                    nextScreen();
+                    const ok = await downloadResults();
+                    if (!ok) modalBtn.disabled = false; // re-enable on failure so user can retry
                 };
             } else {
                 modalUploadStatus.className = 'hidden';
@@ -964,21 +996,25 @@
                 }))
             };
 
-            // Local download
             const json     = JSON.stringify(output, null, 2);
-            const blob     = new Blob([json], { type: 'application/json' });
             const safeName = (studentName || '익명').replace(/[^\w가-힣ㄱ-ㅎㅏ-ㅣ]/g, '_');
             const timestamp = new Date().toISOString().slice(0,19).replace(/[T:]/g,'-');
-            const url = URL.createObjectURL(blob);
-            const a   = document.createElement('a');
-            a.href     = url;
-            a.download = `${safeName}_${timestamp}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
+            const filename  = `${safeName}_${timestamp}.json`;
+
+            function saveLocally() {
+                const blob = new Blob([json], { type: 'application/json' });
+                const url  = URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                a.href = url; a.download = filename; a.click();
+                URL.revokeObjectURL(url);
+            }
 
             // Upload to Google Sheets (if upload_url is set in config)
             const uploadUrl = config?.upload_url;
-            if (!uploadUrl) return;
+            if (!uploadUrl) {
+                saveLocally(); // no upload configured — always save locally
+                return true;
+            }
 
             setUploadStatus('uploading', '업로드 중...');
             try {
@@ -991,14 +1027,16 @@
                 const result = await resp.json();
                 if (result.status === 'ok') {
                     setUploadStatus('success', `✓ 업로드 완료 (${result.rows_added})`);
+                    return true;
                 } else {
                     throw new Error(result.message || '알 수 없는 오류');
                 }
             } catch (err) {
                 console.error('Upload failed:', err);
-                setUploadStatus('error', `✗ 업로드 실패 — 로컬 파일을 제출해 주세요 (${err.message})`);
-                // Wait a moment so the user can read the error before the screen advances
+                setUploadStatus('error', `✗ 업로드 실패 — 파일을 저장합니다 (${err.message})`);
+                saveLocally(); // auto-save locally on upload failure
                 await new Promise(r => setTimeout(r, 3000));
+                return false;
             }
         }
 
