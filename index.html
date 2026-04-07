@@ -335,7 +335,7 @@
         let currentScreen = null;        // screen object while in annotation_task
 
         // Audio + waveform cache keyed by filename
-        // { [filename]: { blobUrl: string|null, waveform: {mins,maxs,sr,duration}|null } }
+        // { [filename]: { arrayBuffer: ArrayBuffer|null, waveform: {mins,maxs,sr,duration}|null } }
         const audioCache = {};
 
         // ── DOM refs ───────────────────────────────────────────────────
@@ -385,7 +385,15 @@
                 window.addEventListener('resize', resizeCanvas);
                 document.addEventListener('keydown', handleKeyDown);
 
-                // 4. Start (audio waveforms are decoded lazily, after user gesture)
+                // 4. Load pre-computed waveform CSVs; fall back to ArrayBuffer prefetch if missing
+                const audioFiles = [...new Set(
+                    config.screens
+                        .filter(s => s.type === 'annotation_task' && s.audio)
+                        .map(s => s.audio)
+                )];
+                await Promise.all(audioFiles.map(f => loadWaveformCSV(f)));
+
+                // 5. Start
                 loadingEl.classList.add('hidden');
                 showScreen(0);
 
@@ -448,30 +456,70 @@
             pitchLogMax += range * 0.08;
         }
 
-        // ── Waveform Decoding (lazy, called after user gesture) ───────
-        // audioCache[filename] = { waveform: {...} | null }
-        async function ensureWaveform(filename) {
-            if (audioCache[filename] !== undefined) return; // already tried
-            audioCache[filename] = { waveform: null };      // mark as attempted
+        // ── Waveform CSV loader (called at init) ─────────────────────────
+        // Tries to load <basename>_waveform.csv; falls back to ArrayBuffer decode if missing.
+        async function loadWaveformCSV(filename) {
+            if (audioCache[filename]?.waveform) return;
+            audioCache[filename] = { waveform: null };
 
+            const csvName = filename.replace(/\.[^.]+$/, '') + '_waveform.csv';
+            try {
+                const resp = await fetch(csvName);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const text = await resp.text();
+                const waveform = parseWaveformCSV(text);
+                if (waveform) { audioCache[filename].waveform = waveform; return; }
+            } catch (_) { /* CSV not found — fall through to ArrayBuffer decode */ }
+
+            // Fallback: prefetch raw bytes for later decode after user gesture
             try {
                 const resp = await fetch(filename);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const arrayBuffer = await resp.arrayBuffer();
+                audioCache[filename].arrayBuffer = await resp.arrayBuffer();
+            } catch (e) {
+                console.warn(`Audio prefetch failed for "${filename}":`, e.message);
+            }
+        }
 
-                // AudioContext creation is safe here: user has already clicked a button
+        function parseWaveformCSV(text) {
+            const lines = text.split(/\r?\n/);
+            let sr = 500, duration = 0;
+            const mins = [], maxs = [];
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                if (line.startsWith('#')) {
+                    // # sr=500,duration=185.237
+                    const m = line.match(/sr=([0-9.]+).*duration=([0-9.]+)/);
+                    if (m) { sr = +m[1]; duration = +m[2]; }
+                    continue;
+                }
+                const parts = line.split(',');
+                if (parts.length < 2) continue;
+                mins.push(+parts[0]);
+                maxs.push(+parts[1]);
+            }
+            if (!mins.length) return null;
+            return { mins: new Float32Array(mins), maxs: new Float32Array(maxs), sr, duration };
+        }
+
+        // ── Waveform Decoding fallback (called after user gesture, AudioContext safe) ──
+        async function ensureWaveform(filename) {
+            if (audioCache[filename]?.waveform) return; // CSV already loaded
+
+            const arrayBuffer = audioCache[filename]?.arrayBuffer;
+            if (!arrayBuffer) return; // no bytes available — show empty band
+
+            try {
                 const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
                 let audioBuffer;
                 try {
-                    audioBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+                    audioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
                 } finally {
                     tempCtx.close();
                 }
-
-                audioCache[filename] = { waveform: buildWaveformThumbnail(audioBuffer) };
+                audioCache[filename].waveform = buildWaveformThumbnail(audioBuffer);
             } catch (e) {
                 console.warn(`Waveform decode failed for "${filename}":`, e.message);
-                // waveform stays null — visualization shows empty band, audio still plays
             }
         }
 
