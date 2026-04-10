@@ -345,10 +345,6 @@
         let currentPhase  = 1;
         let studentName   = '';
 
-        let pitchContour  = [];          // [{t, f, valid}]
-        let pitchLogMin   = 0;
-        let pitchLogMax   = 1;
-
         let pps           = 160;         // pixels per second (from config)
         let dpr           = 1;
 
@@ -360,6 +356,10 @@
         // Audio + waveform cache keyed by filename
         // { [filename]: { arrayBuffer: ArrayBuffer|null, waveform: {mins,maxs,sr,duration}|null } }
         const audioCache = {};
+
+        // Pitch contour cache keyed by audio filename
+        // { [filename]: { contour, logMin, logMax } | null }
+        const contourCache = {};
 
         // ── DOM refs ───────────────────────────────────────────────────
         const loadingEl      = document.getElementById('loading');
@@ -394,28 +394,25 @@
                 config = jsyaml.load(await cfgResp.text());
                 pps = config.pixels_per_second || 160;
 
-                // 2. Load pitch contour (optional, small file — fine to load upfront)
-                setLoadingText('음고 데이터 로딩 중...');
                 setLoadingProgress(50);
-                try {
-                    const pr = await fetch('pitch_contour.csv');
-                    if (pr.ok) parsePitchContour(await pr.text());
-                } catch (_) { /* optional */ }
 
-                setLoadingProgress(100);
-
-                // 3. Setup
+                // 2. Setup
                 resizeCanvas();
                 window.addEventListener('resize', resizeCanvas);
                 document.addEventListener('keydown', handleKeyDown);
 
-                // 4. Load pre-computed waveform CSVs; fall back to ArrayBuffer prefetch if missing
+                // 3. Load waveform CSVs + contour CSVs for all audio files in parallel
                 const audioFiles = [...new Set(
                     config.screens
                         .filter(s => s.type === 'annotation_task' && s.audio)
                         .map(s => s.audio)
                 )];
-                await Promise.all(audioFiles.map(f => loadWaveformCSV(f)));
+                await Promise.all([
+                    ...audioFiles.map(f => loadWaveformCSV(f)),
+                    ...audioFiles.map(f => loadContourCSV(f)),
+                ]);
+
+                setLoadingProgress(100);
 
                 // 5. Start
                 loadingEl.classList.add('hidden');
@@ -447,12 +444,13 @@
         }
 
         // ── Pitch Contour Parsing ──────────────────────────────────────
+        // Returns { contour, logMin, logMax } or null if no valid data.
         function parsePitchContour(text) {
             const rows = text.split(/\r?\n/);
             const pts = [];
             for (const row of rows) {
                 const line = row.trim();
-                if (!line) continue;
+                if (!line || line.startsWith('#')) continue;
                 const parts = line.split(',');
                 if (parts.length < 2) continue;
                 const t = +parts[0];
@@ -462,22 +460,22 @@
                 const valid = isFinite(f) && f >= 40 && f <= 2200 && isFinite(c) && c >= 0.08;
                 pts.push({ t, f, c, valid });
             }
-            if (!pts.length) return;
+            if (!pts.length) return null;
 
-            pitchContour = pts.sort((a, b) => a.t - b.t);
-
-            const validFreqs = pitchContour.filter(p => p.valid).map(p => p.f).sort((a, b) => a - b);
-            if (!validFreqs.length) return;
+            const contour = pts.sort((a, b) => a.t - b.t);
+            const validFreqs = contour.filter(p => p.valid).map(p => p.f).sort((a, b) => a - b);
+            if (!validFreqs.length) return null;
 
             const lo = validFreqs[Math.floor(validFreqs.length * 0.02)];
             const hi = validFreqs[Math.floor(validFreqs.length * 0.98)];
-            pitchLogMin = Math.log10(Math.max(1, lo));
-            pitchLogMax = Math.log10(Math.max(1, hi > lo ? hi : lo + 1));
-            if (!(pitchLogMax > pitchLogMin)) pitchLogMax = pitchLogMin + 0.5;
-            // Add a little vertical padding
-            const range = pitchLogMax - pitchLogMin;
-            pitchLogMin -= range * 0.08;
-            pitchLogMax += range * 0.08;
+            let logMin = Math.log10(Math.max(1, lo));
+            let logMax = Math.log10(Math.max(1, hi > lo ? hi : lo + 1));
+            if (!(logMax > logMin)) logMax = logMin + 0.5;
+            const range = logMax - logMin;
+            logMin -= range * 0.08;
+            logMax += range * 0.08;
+
+            return { contour, logMin, logMax };
         }
 
         // ── Waveform CSV loader (called at init) ─────────────────────────
@@ -544,6 +542,19 @@
                 audioCache[filename].waveform = buildWaveformThumbnail(audioBuffer);
             } catch (e) {
                 console.warn(`Waveform decode failed for "${filename}":`, e.message);
+            }
+        }
+
+        // ── Contour CSV Loader (called at init) ───────────────────────
+        async function loadContourCSV(audioFilename) {
+            const csvName = audioFilename.replace(/\.[^.]+$/, '') + '_contour.csv';
+            try {
+                const resp = await fetch(csvName);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const parsed = parsePitchContour(await resp.text());
+                contourCache[audioFilename] = parsed; // null if file was empty/invalid
+            } catch (_) {
+                contourCache[audioFilename] = null; // not available
             }
         }
 
@@ -782,16 +793,20 @@
             const pitchH  = Math.floor(vizH * 0.55);
             const waveH   = vizH - pitchH;
 
-            // Pitch band
-            drawPitchBand(ctx, t, centerX, vizY, W, pitchH);
+            // Pitch band (only when contour is available for current audio)
+            const contourData = contourCache[currentScreen?.audio] || null;
+            if (contourData) {
+                drawPitchBand(ctx, t, centerX, vizY, W, pitchH, contourData);
+                // Divider
+                ctx.fillStyle = 'rgba(255,255,255,0.06)';
+                ctx.fillRect(0, vizY + pitchH, W, 1);
+            }
 
-            // Divider
-            ctx.fillStyle = 'rgba(255,255,255,0.06)';
-            ctx.fillRect(0, vizY + pitchH, W, 1);
-
-            // Waveform band
+            // Waveform band (full height when no contour, lower portion otherwise)
+            const waveY = contourData ? vizY + pitchH : vizY;
+            const waveHActual = contourData ? waveH : vizH;
             const waveform = audioCache[currentScreen?.audio]?.waveform || null;
-            drawWaveformBand(ctx, t, centerX, waveform, 0, vizY + pitchH, W, waveH);
+            drawWaveformBand(ctx, t, centerX, waveform, 0, waveY, W, waveHActual);
 
             // Annotation markers (slightly taller than the viz area)
             const annPad = 14; // px overhang above and below viz bands
@@ -804,15 +819,16 @@
 
         // ── Draw: Pitch Contour ────────────────────────────────────────
         // y0: top of band, H: height of band (both in CSS px)
-        function drawPitchBand(ctx, t, centerX, y0, W, H) {
-            if (!pitchContour.length) return;
+        // contourData: { contour, logMin, logMax } from contourCache
+        function drawPitchBand(ctx, t, centerX, y0, W, H, contourData) {
+            const { contour, logMin, logMax } = contourData;
 
             const halfW   = centerX;
             const tStart  = t - halfW / pps;
             const tEnd    = t + halfW / pps;
             const MAX_GAP = 0.15;
 
-            let si = pitchLowerBound(tStart);
+            let si = pitchLowerBound(contour, tStart);
             if (si > 0) si--;
 
             ctx.save();
@@ -824,15 +840,14 @@
             let prevT  = -999;
             let inPath = false;
 
-            for (let i = si; i < pitchContour.length; i++) {
-                const p = pitchContour[i];
+            for (let i = si; i < contour.length; i++) {
+                const p = contour[i];
                 if (p.t > tEnd) break;
                 if (!p.valid) { inPath = false; continue; }
 
                 const px = centerX + (p.t - t) * pps;
                 const lf = Math.log10(Math.max(1, p.f));
-                // map frequency to y within [y0, y0+H]
-                const py  = y0 + H - ((lf - pitchLogMin) / (pitchLogMax - pitchLogMin)) * H;
+                const py  = y0 + H - ((lf - logMin) / (logMax - logMin)) * H;
                 const cpy = Math.max(y0 + 2, Math.min(y0 + H - 2, py));
 
                 if (!inPath || (p.t - prevT) > MAX_GAP) {
@@ -852,11 +867,11 @@
             ctx.restore();
         }
 
-        function pitchLowerBound(targetT) {
-            let lo = 0, hi = pitchContour.length;
+        function pitchLowerBound(contour, targetT) {
+            let lo = 0, hi = contour.length;
             while (lo < hi) {
                 const mid = (lo + hi) >> 1;
-                if (pitchContour[mid].t < targetT) lo = mid + 1;
+                if (contour[mid].t < targetT) lo = mid + 1;
                 else hi = mid;
             }
             return lo;
@@ -983,9 +998,9 @@
         // ── Results Download + Upload ──────────────────────────────────
         async function downloadResults() {
             const output = {
-                exported_at:  new Date().toISOString(),
+                exported_at:  new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace(' ', 'T') + '+09:00',
                 student_name: studentName || '익명',
-                results: results.filter(r => r.mode !== 'practice').map(r => ({
+                results: results.map(r => ({
                     screen_id:   r.screenId,
                     phase:       r.phase,
                     mode:        r.mode,

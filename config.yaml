@@ -74,7 +74,7 @@ screens:
     type: annotation_task
     phase: 1
     mode: practice
-    audio: "practice.wav"
+    audio: "test1.wav"
     instruction: "장단이 바뀌는 순간에 {key}를 누르세요"
 
   # ── 1단계 평가 시작 안내 ─────────────────────────────────────
@@ -121,7 +121,7 @@ screens:
     type: annotation_task
     phase: 2
     mode: practice
-    audio: "practice.wav"
+    audio: "test2.wav"
     instruction: "장단 주기가 시작되는 순간에 {key}를 누르세요"
 
   # ── 2단계 평가 시작 안내 ─────────────────────────────────────
